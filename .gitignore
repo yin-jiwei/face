@@ -1,0 +1,9 @@
+# idea
+.idea/
+
+# CMake
+cmake-build-*/
+
+# doc
+doc*/
+
