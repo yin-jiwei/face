@@ -2,10 +2,13 @@
 <Config>
     <LocalServerIP>192.168.10.10</LocalServerIP>
     <LocalServerPort>8091</LocalServerPort>
-    <GUIServerIP>192.168.10.12</GUIServerIP>
-    <GUIServerPort>19800</GUIServerPort>
+    <GUIServerIP>localhost</GUIServerIP>
+    <GUIServerPort>9000</GUIServerPort>
     <PassSimilarity>60</PassSimilarity>
     <FaceListMaxSize>50</FaceListMaxSize>
     <FaceValidSecond>5</FaceValidSecond>
     <ExtractThreadNum>1</ExtractThreadNum>
+    <Mode>1</Mode>
+    <FaceResultListMaxSize>10</FaceResultListMaxSize>
+    <DelayRetrievalMillisecond>1000</DelayRetrievalMillisecond>
 </Config>

@@ -5,23 +5,37 @@
  *      Author: fbd
  */
 
-#include "Logger.h"
-#include "CfgData.h"
 #include <sys/syscall.h>
+#include "Logger.h"
 
 #define LOG_QUEUE_MAX_SIZE        4096
-//#define LOG_FILE_NAME			"/Log/DataSync" //Do not add the extern file name
-
 
 CLogger CLogger::_Instance;
 
 CLogger::CLogger()
 {
     // TODO Auto-generated constructor stub
-    /*	char buffer[512];
-     if ( NULL != getcwd(buffer, 512)) {
-     m_strExeFullPath = buffer;
-     }*/
+
+    // full path
+    char c_path[1024];
+    int len = readlink("/proc/self/exe", c_path, 1024);
+    if (len < 0 || len >= 1024)
+    {
+        return;
+    }
+
+    c_path[len] = '\0';
+
+    // program name
+    char *p_name = strrchr(c_path, '/') + 1;
+    program_name_ = p_name;
+
+    // absolute path
+    *p_name = '\0';
+    string full_path = c_path;
+
+    // log dir
+    log_dir_ = full_path + "log/";
 }
 
 CLogger::~CLogger()
@@ -34,14 +48,6 @@ void CLogger::Log(LEVEL level, string lpszLog)
     if (m_thread == 0)
     {
         return;
-    }
-
-    if (level == LEVEL_FINE || level == LEVEL_FINER)
-    {
-        if (!CCfgData::Instance().get_log_verbose())
-        {
-            return;
-        }
     }
 
     char strTime[128] = {0};
@@ -138,12 +144,11 @@ void *CLogger::ThreadWriteProc(void *lpParam)
 
 void CLogger::CreateLogFile()
 {
-    string strLogdir = CCfgData::Instance().get_full_path() + "log/";
-    if (access(strLogdir.c_str(), F_OK) == -1)
-        if (mkdir(strLogdir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) == -1)
+    if (access(log_dir_.c_str(), F_OK) == -1)
+        if (mkdir(log_dir_.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) == -1)
             perror("create log dir failure.");
 
-    CleanExpiredLogFile(strLogdir);
+    CleanExpiredLogFile(log_dir_);
 
     if (m_file != NULL)
     {
@@ -153,7 +158,7 @@ void CLogger::CreateLogFile()
 
     /*	string strFileName = m_strExeFullPath + LOG_FILE_NAME + m_strCurFileTime
     		+ ".txt";*/
-    string strFileName = strLogdir + CCfgData::Instance().get_program_name() + m_strCurFileTime
+    string strFileName = log_dir_ + program_name_ + m_strCurFileTime
                          + ".txt";
 
     m_file = fopen(strFileName.c_str(), "a");
@@ -197,7 +202,7 @@ void CLogger::CleanExpiredLogFile(string strdir)
     struct tm *p = localtime(&oldTime);
 
     char cOld[256] = {0};
-    sprintf(cOld, "%s%04d-%02d-%02d.txt", CCfgData::Instance().get_program_name().c_str(),
+    sprintf(cOld, "%s%04d-%02d-%02d.txt", program_name_.c_str(),
             1900 + p->tm_year, 1 + p->tm_mon, p->tm_mday);
 
     string strOld(cOld);

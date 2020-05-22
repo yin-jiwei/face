@@ -29,6 +29,8 @@ public:
 
     bool RetrieveFace(const char *image_data64, int &score, char *face_data);
 
+    bool RetrieveFace(PhotoInfo *p_photo_info);
+
     void Load_Features_N();
 
 private:

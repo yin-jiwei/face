@@ -8,6 +8,8 @@
 #include <thread>
 #include "Face_1_N.h"
 
+struct FaceInfo;
+
 class ExtractFeatureThread
 {
 public:
@@ -22,7 +24,7 @@ private:
 
     void ExtractFeature();
 
-    void ExtractFeatureYJ();
+    void RetrieveFace(FaceInfo *p_face);
 
 private:
     std::thread *thread_ = nullptr;

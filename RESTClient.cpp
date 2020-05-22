@@ -41,17 +41,18 @@ bool RESTClient::SendFace(PFaceInfo p_face)
 
     // make the JSON REST POST request and get response
     request["person_id"] = p_face->person_id;
-    request["img"] = p_face->image_data;
-    request["width"] = p_face->image_width;
-    request["height"] = p_face->image_height;
+    request["snapshot_base64"] = p_face->image_base64;
+//    request["snapshot_width"] = p_face->image_width;
+//    request["snapshot_height"] = p_face->image_height;
 
     if (p_face->score * 100 >= CCfgData::Instance().get_pass_similarity() && p_face->p_photo_info != nullptr)
     {
-        request["photo_flag"] = 1;
+//        request["photo_flag"] = 1;
+        request["pass_similarity"] = CCfgData::Instance().get_pass_similarity();
         request["score"] = p_face->score * 100;
-        request["photo_id"] = p_face->p_photo_info->photo_person_id;
-        request["photo_name"] = p_face->p_photo_info->photo_person_name;
-        request["photo_department"] = p_face->p_photo_info->photo_person_department;
+        request["photo_id"] = p_face->p_photo_info->id;
+        request["photo_name"] = p_face->p_photo_info->name;
+        request["photo_department"] = p_face->p_photo_info->department;
 
         // read photo data
         string photo_path = CCfgData::Instance().get_full_path() + "photos/" + p_face->p_photo_info->photo_path;
@@ -65,21 +66,21 @@ bool RESTClient::SendFace(PFaceInfo p_face)
 
             // base64 encode
             CBase64::Encode(jpeg_data, jpeg_size, base64_data);
-            request["photo_img"] = (char *) base64_data;
+            request["photo_base64"] = (char *) base64_data;
 
-            Mat jpg_mat = imread(photo_path, CV_LOAD_IMAGE_COLOR);
-            //检测是否加载成功
-            if (jpg_mat.data)  //or == if(jpg_mat.empty())
-            {
-                request["photo_width"] = jpg_mat.cols;
-                request["photo_height"] = jpg_mat.rows;
-            }
+//            Mat jpg_mat = imread(photo_path, CV_LOAD_IMAGE_COLOR);
+//            //检测是否加载成功
+//            if (jpg_mat.data)  //or == if(jpg_mat.empty())
+//            {
+//                request["photo_width"] = jpg_mat.cols;
+//                request["photo_height"] = jpg_mat.rows;
+//            }
         }
     }
-    else
-    {
-        request["photo_flag"] = 0;
-    }
+//    else
+//    {
+//        request["photo_flag"] = 0;
+//    }
 
     if (json_call(ctx, gui_url.c_str(), request, response))
     {
@@ -105,6 +106,78 @@ bool RESTClient::SendFace(PFaceInfo p_face)
 
     delete[] jpeg_data;
     delete[] base64_data;
+
+    return rtn;
+}
+
+bool RESTClient::SendFace(PFaceInfo p_face, PPhotoInfo p_photo_info, int score)
+{
+    string log_message;
+    bool rtn = true;
+
+    if (p_photo_info == nullptr)
+        return false;
+
+    soap *ctx = soap_new1(SOAP_C_UTFSTRING | SOAP_XML_INDENT);
+    ctx->send_timeout = 3; // 3 sec, stop if server is not accepting msg
+    ctx->recv_timeout = 3; // 3 sec, stop if server does not respond in time
+
+    string gui_url;
+    gui_url = "http://" + CCfgData::Instance().get_gui_server_ip() + ":" +
+              to_string(CCfgData::Instance().get_gui_server_port()) + "/faceview";
+
+    value request(ctx), response(ctx);
+
+    // make the JSON REST POST request and get response
+    request["person_id"] = 0;
+
+    if (nullptr != p_face)
+    {
+        request["snapshot_base64"] = p_face->image_base64;
+    }
+    else
+    {
+        request["snapshot_base64"] = "";
+    }
+//    request["snapshot_width"] = p_face->image_width;
+//    request["snapshot_height"] = p_face->image_height;
+
+    request["pass_similarity"] = CCfgData::Instance().get_pass_similarity();
+    request["score"] = score;
+    request["photo_id"] = p_photo_info->id;
+    request["photo_name"] = p_photo_info->name;
+    request["photo_department"] = p_photo_info->department;
+    request["photo_base64"] = p_photo_info->image_base64;
+
+//    Mat jpg_mat = imread(photo_path, CV_LOAD_IMAGE_COLOR);
+//    //检测是否加载成功
+//    if (jpg_mat.data)  //or == if(jpg_mat.empty())
+//    {
+//        request["photo_width"] = jpg_mat.cols;
+//        request["photo_height"] = jpg_mat.rows;
+//    }
+
+    if (json_call(ctx, gui_url.c_str(), request, response))
+    {
+        stringstream error_message;
+        soap_stream_fault(ctx, error_message);
+        log_message.clear();
+        log_message = "rest failure, errInfo:" + error_message.str();
+        WARNING_LOG(log_message);
+
+        rtn = false;
+    }
+    else
+    {
+        log_message.clear();
+        log_message = "SendImage is successful.";
+        INFO_LOG(log_message);
+    }
+
+    // clean up
+    soap_destroy(ctx);
+    soap_end(ctx);
+    soap_free(ctx);
 
     return rtn;
 }

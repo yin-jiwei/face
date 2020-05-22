@@ -190,7 +190,14 @@ void *CameraRESTServer::ServeRequest(void *arg)
 
             if (request_path == "/VIID/System/Register") //视图库注册
             {
-                camera_id = (char *) request["DeviceID"];
+                if (request.has("DeviceID"))
+                {
+                    camera_id = (char *) request["DeviceID"];
+                }
+                else if (request.has("RegisterObject") && request["RegisterObject"].has("DeviceID"))
+                {
+                    camera_id = (char *) request["RegisterObject"]["DeviceID"];
+                }
 
                 PCameraInfo p_camera = CCfgData::Instance().FindCameraByIP(camera_ip);
                 if (p_camera == nullptr)
@@ -214,7 +221,14 @@ void *CameraRESTServer::ServeRequest(void *arg)
             }
             else if (request_path == "/VIID/System/UnRegister") //视图库注销
             {
-                camera_id = (char *) request["DeviceID"];
+                if (request.has("DeviceID"))
+                {
+                    camera_id = (char *) request["DeviceID"];
+                }
+                else if (request.has("UnRegisterObject") && request["UnRegisterObject"].has("DeviceID"))
+                {
+                    camera_id = (char *) request["UnRegisterObject"]["DeviceID"];
+                }
 
                 PCameraInfo p_camera = CCfgData::Instance().FindCameraByIP(camera_ip, true);
                 if (p_camera != nullptr)
@@ -235,7 +249,14 @@ void *CameraRESTServer::ServeRequest(void *arg)
             }
             else if (request_path == "/VIID/System/Keepalive") //视图库心跳
             {
-                camera_id = (char *) request["DeviceID"];
+                if (request.has("DeviceID"))
+                {
+                    camera_id = (char *) request["DeviceID"];
+                }
+                else if (request.has("KeepaliveObject") && request["KeepaliveObject"].has("DeviceID"))
+                {
+                    camera_id = (char *) request["KeepaliveObject"]["DeviceID"];
+                }
 
                 PCameraInfo p_camera = CCfgData::Instance().FindCameraByIP(camera_ip);
                 if (p_camera != nullptr)
@@ -263,14 +284,19 @@ void *CameraRESTServer::ServeRequest(void *arg)
                     int image_height = request["ImageListObject"]["Image"][i]["ImageInfo"]["Height"];
 
                     // get person_id
-                    string title_note = (char *) request["ImageListObject"]["Image"][i]["ImageInfo"]["TitleNote"];
-                    unsigned long pos1 = title_note.find('_', 10);
-                    unsigned long pos2 = title_note.find('_', pos1 + 1);
+                    unsigned long person_id = 0;
+                    int new_person = 0;
+                    if (request["ImageListObject"]["Image"][i]["ImageInfo"].has("TitleNote"))
+                    {
+                        string title_note = (char *) request["ImageListObject"]["Image"][i]["ImageInfo"]["TitleNote"];
+                        unsigned long pos1 = title_note.find('_', 10);
+                        unsigned long pos2 = title_note.find('_', pos1 + 1);
 
-                    unsigned long person_id = atol(title_note.substr(10, pos1 - 10).c_str());
-                    int new_person = atoi(title_note.substr(pos1 + 1, pos2 - pos1 - 1).c_str());
+                        person_id = atol(title_note.substr(10, pos1 - 10).c_str());
+                        new_person = atoi(title_note.substr(pos1 + 1, pos2 - pos1 - 1).c_str());
+                    }
 
-                    // get image_data
+                    // get image_base64
                     if (request["ImageListObject"]["Image"][i].has("Data"))
                     {
                         char *image_data = request["ImageListObject"]["Image"][i]["Data"];
@@ -281,7 +307,7 @@ void *CameraRESTServer::ServeRequest(void *arg)
                         p_face->person_id = person_id;
                         p_face->new_person = new_person;
 
-                        memcpy(p_face->image_data, image_data, strlen(image_data));
+                        memcpy(p_face->image_base64, image_data, strlen(image_data));
                         p_face->image_size = strlen(image_data);
 
                         p_face->image_width = image_width;
@@ -289,8 +315,59 @@ void *CameraRESTServer::ServeRequest(void *arg)
 
                         p_face->create_time = tv.tv_sec;
 
+                        CCfgData::Instance().face_info_list_.Lock();
+                        if (CCfgData::Instance().face_info_list_.GetSize() > 0)
+                        {
+                            delete CCfgData::Instance().face_info_list_.RemoveHead();
+                        }
+
                         CCfgData::Instance().face_info_list_.Add(p_face);
+
+                        CCfgData::Instance().face_info_list_.Unlock();
+
                         CCfgData::Instance().sem_face_avail_.Post();
+                    }
+                    else
+                    {
+                        int faceObject_size = request["ImageListObject"]["Image"][i]["FaceList"]["FaceObject"].size();
+                        for (int j = 0; j < faceObject_size; j++)
+                        {
+                            int subImageInfoObject_size = request["ImageListObject"]["Image"][i]["FaceList"]["FaceObject"][j]["SubImageList"]["SubImageInfoObject"].size();
+                            for (int k = 0; k < subImageInfoObject_size; k++)
+                            {
+                                if (request["ImageListObject"]["Image"][i]["FaceList"]["FaceObject"][j]["SubImageList"]["SubImageInfoObject"][k].has(
+                                        "Data"))
+                                {
+                                    char *image_data = request["ImageListObject"]["Image"][i]["FaceList"]["FaceObject"][j]["SubImageList"]["SubImageInfoObject"][k]["Data"];
+
+                                    //auto p_face = new FaceInfo();
+                                    PFaceInfo p_face = new FaceInfo();
+
+                                    p_face->person_id = person_id;
+                                    p_face->new_person = new_person;
+
+                                    memcpy(p_face->image_base64, image_data, strlen(image_data));
+                                    p_face->image_size = strlen(image_data);
+
+                                    p_face->image_width = image_width;
+                                    p_face->image_height = image_height;
+
+                                    p_face->create_time = tv.tv_sec;
+
+                                    CCfgData::Instance().face_info_list_.Lock();
+                                    if (CCfgData::Instance().face_info_list_.GetSize() > 0)
+                                    {
+                                        delete CCfgData::Instance().face_info_list_.RemoveHead();
+                                    }
+
+                                    CCfgData::Instance().face_info_list_.Add(p_face);
+
+                                    CCfgData::Instance().face_info_list_.Unlock();
+
+                                    CCfgData::Instance().sem_face_avail_.Post();
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -309,11 +386,11 @@ void *CameraRESTServer::ServeRequest(void *arg)
                 char *image_data = request["imageBase64"];
 
                 // compare_id
-//                uuid_t uuid;
-//                char c_uuid[36];
-//                uuid_generate(uuid);
-//                uuid_unparse(uuid, c_uuid);
-//                string compare_id = c_uuid;
+            //    uuid_t uuid;
+            //    char c_uuid[36];
+            //    uuid_generate(uuid);
+            //    uuid_unparse(uuid, c_uuid);
+            //    string compare_id = c_uuid;
 
                 log_message.clear();
                 log_message = "EmployeeCreate employeeID: " + photo_id + ", name: " + photo_name +
@@ -328,19 +405,19 @@ void *CameraRESTServer::ServeRequest(void *arg)
                                                                        image_data);
                 if (rtn)
                 {
-//                    pthread_rwlock_wrlock(&CCfgData::Instance().photo_features_lock_);
-//                    // fetch feature
-//                    CCfgData::Instance().FetchFeature();
-//
-//                    CCfgData::Instance().p_pef_->Load_Features_N();
-//
-//                    // update ExtractFeatureThread
-//                    for (int i = 0; i < CCfgData::Instance().extract_thread_list_.GetSize(); ++i)
-//                    {
-//                        ExtractFeatureThread *extract_thread = CCfgData::Instance().extract_thread_list_.GetAt(i);
-//                        extract_thread->Load_Features_N();
-//                    }
-//                    pthread_rwlock_unlock(&CCfgData::Instance().photo_features_lock_);
+                //    pthread_rwlock_wrlock(&CCfgData::Instance().photo_features_lock_);
+                //    // fetch feature
+                //    CCfgData::Instance().FetchFeature();
+
+                //    CCfgData::Instance().p_pef_->Load_Features_N();
+
+                //    // update ExtractFeatureThread
+                //    for (int i = 0; i < CCfgData::Instance().extract_thread_list_.GetSize(); ++i)
+                //    {
+                //        ExtractFeatureThread *extract_thread = CCfgData::Instance().extract_thread_list_.GetAt(i);
+                //        extract_thread->Load_Features_N();
+                //    }
+                //    pthread_rwlock_unlock(&CCfgData::Instance().photo_features_lock_);
 
                     CCfgData::Instance().modify_feature_flag_ = true;
 
@@ -650,10 +727,10 @@ void *CameraRESTServer::ServeRequest(void *arg)
                     response["rtn"] = 0;
                     response["message"] = "成功";
                     response["similarity"] = score;
-                    response["photo_id"] = p_photo_info->photo_person_id;
-                    response["photo_compare_id"] = p_photo_info->photo_uuid;
-                    response["photo_name"] = p_photo_info->photo_person_name;
-                    response["photo_department"] = p_photo_info->photo_person_department;
+                    response["photo_id"] = p_photo_info->id;
+                    response["photo_compare_id"] = p_photo_info->uuid;
+                    response["photo_name"] = p_photo_info->name;
+                    response["photo_department"] = p_photo_info->department;
                     response["photo_img"] = face_data;
                 }
                 else
@@ -664,11 +741,46 @@ void *CameraRESTServer::ServeRequest(void *arg)
 
                 delete[] face_data;
             }
-            else if (request_path == "/") // 燕京比对
+            else if (request_path == "/snapshots/retrieval") //卡照片比对抓拍照片
+            {
+                string photo_id = request["employeeID"];
+                string photo_name = request["name"];
+                string photo_department = request["department"];
+                char *image_base64 = request["imageBase64"];
+
+                log_message.clear();
+                log_message = "/snapshots/retrieval employeeID: " + photo_id + ", name: " + photo_name + ".";
+                INFO_LOG(log_message);
+
+                PPhotoInfo photo_info = new PhotoInfo();
+                photo_info->id = photo_id;
+                photo_info->name = photo_name;
+                photo_info->department = photo_department;
+                photo_info->create_time = tv;
+
+                photo_info->image_base64 = new char[BMP_SIZE];
+                memset(photo_info->image_base64, 0, BMP_SIZE);
+
+                memcpy(photo_info->image_base64, image_base64, strlen(image_base64));
+                photo_info->image_size = strlen(image_base64);
+
+                CCfgData::Instance().retrieval_photo_list_.Lock();
+                if (CCfgData::Instance().retrieval_photo_list_.GetSize() <
+                    CCfgData::Instance().get_face_result_maxsize())
+                {
+                    CCfgData::Instance().retrieval_photo_list_.Add(photo_info);
+                }
+                else
+                {
+                    delete photo_info;
+                }
+                CCfgData::Instance().retrieval_photo_list_.Unlock();
+            }
+            else if (request_path == "/")
             {
                 if (request.has("fun"))
                 {
-                    if (0 == strcmp(request["fun"], "getScore"))
+                    if (0 == strcmp(request["fun"], "getScore")) // 燕京比对
                     {
                         char *image_data = request["img"];
 
@@ -695,10 +807,47 @@ void *CameraRESTServer::ServeRequest(void *arg)
 
                         delete[] face_data;
                     }
-                    else if (0 == strcmp(request["fun"], "getStatus"))
+                    else if (0 == strcmp(request["fun"], "getStatus")) // 获得状态
                     {
                         int n = (CCfgData::Instance().camera_info_list_.GetSize() > 0) ? 1 : 0;
                         response["status"] = n;
+                    }
+                    else if (0 == strcmp(request["fun"], "sendPicture")) // 央视接口
+                    {
+                        string photo_id = request["id"];
+                        string photo_name = request["name"];
+                        string photo_department = request["department"];
+                        char *image_base64 = request["img"];
+
+                        log_message.clear();
+                        log_message = "/snapshots/retrieval employeeID: " + photo_id + ", name: " + photo_name + ".";
+                        INFO_LOG(log_message);
+
+                        PPhotoInfo photo_info = new PhotoInfo();
+                        photo_info->id = photo_id;
+                        photo_info->name = photo_name;
+                        photo_info->department = photo_department;
+                        photo_info->create_time = tv;
+
+                        photo_info->image_base64 = new char[BMP_SIZE];
+                        memset(photo_info->image_base64, 0, BMP_SIZE);
+
+                        memcpy(photo_info->image_base64, image_base64, strlen(image_base64));
+                        photo_info->image_size = strlen(image_base64);
+
+                        CCfgData::Instance().retrieval_photo_list_.Lock();
+                        if (CCfgData::Instance().retrieval_photo_list_.GetSize() <
+                            CCfgData::Instance().get_face_result_maxsize())
+                        {
+                            CCfgData::Instance().retrieval_photo_list_.Add(photo_info);
+                        }
+                        else
+                        {
+                            delete photo_info;
+                        }
+                        CCfgData::Instance().retrieval_photo_list_.Unlock();
+
+                        response["status"] = "OK";
                     }
                 }
             }
@@ -706,12 +855,12 @@ void *CameraRESTServer::ServeRequest(void *arg)
             // http content type
             ctx->http_content = "application/json; charset=utf-8";
             // http content length
-            if (soap_begin_count(ctx)
-                || ((ctx->mode & SOAP_IO_LENGTH) && json_send(ctx, response))
-                || soap_end_count(ctx)
-                || soap_response(ctx, SOAP_FILE)
-                || json_send(ctx, response)
-                || soap_end_send(ctx))
+            if (soap_begin_count(ctx) ||
+                ((ctx->mode & SOAP_IO_LENGTH) && json_send(ctx, response)) ||
+                soap_end_count(ctx) ||
+                soap_response(ctx, SOAP_FILE) ||
+                json_send(ctx, response) ||
+                soap_end_send(ctx))
             {
                 stringstream error_message;
                 soap_stream_fault(ctx, error_message);

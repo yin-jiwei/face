@@ -18,25 +18,35 @@
 
 typedef struct PhotoInfo
 {
-    string photo_person_id;
-    string photo_uuid;
-    string photo_person_name;
-    string photo_person_department;
+    string id;
+    string uuid;
+    string name;
+    string department;
     string photo_path;
 
+    // jpg
+    char *image_base64 = nullptr;
+    int image_size = 0;
+    struct timeval create_time;
 
     PhotoInfo()
     {
-        photo_person_id.clear();
-        photo_uuid.clear();
-        photo_person_name.clear();
-        photo_person_department.clear();
+        id.clear();
+        uuid.clear();
+        name.clear();
+        department.clear();
         photo_path.clear();
 
+        memset(&create_time, 0, sizeof(create_time));
     }
 
     ~PhotoInfo()
     {
+        if (nullptr != image_base64)
+        {
+            delete[] image_base64;
+            image_base64 = nullptr;
+        }
     }
 } *PPhotoInfo;
 
@@ -45,7 +55,7 @@ typedef struct FaceInfo
     unsigned long person_id;  /// camera person id
     int new_person; /// 0:yes; 1:not.
 
-    char *image_data;
+    char *image_base64;
     int image_size;
 
     int image_width;
@@ -65,8 +75,8 @@ typedef struct FaceInfo
         person_id = 0;
         new_person = 0;
 
-        image_data = new char[BMP_SIZE];
-        memset(image_data, 0, BMP_SIZE);
+        image_base64 = new char[BMP_SIZE];
+        memset(image_base64, 0, BMP_SIZE);
         image_size = 0;
 
         image_width = 0;
@@ -79,10 +89,10 @@ typedef struct FaceInfo
 
     ~FaceInfo()
     {
-        if (nullptr != image_data)
+        if (nullptr != image_base64)
         {
-            delete[] image_data;
-            image_data = nullptr;
+            delete[] image_base64;
+            image_base64 = nullptr;
         }
 
         if (nullptr != image_feature)
@@ -136,11 +146,6 @@ public:
         return program_name_;
     }
 
-    bool get_log_verbose()
-    {
-        return log_verbose_;
-    }
-
     const string &get_hwdata_path()
     {
         return hwdata_path_;
@@ -171,9 +176,9 @@ public:
         return pass_similarity_;
     }
 
-    int get_face_result_maxsize()
+    int get_face_list_maxsize()
     {
-        return face_result_maxsize_;
+        return face_list_maxsize_;
     }
 
     int get_face_valid_second()
@@ -184,6 +189,21 @@ public:
     int get_extract_thread_num()
     {
         return extract_thread_num_;
+    }
+
+    int get_mode()
+    {
+        return mode_;
+    }
+
+    int get_face_result_maxsize()
+    {
+        return face_result_maxsize_;
+    }
+
+    int get_delay_retrieval_millisecond()
+    {
+        return delay_retrieval_millisecond_;
     }
 
     PCameraInfo FindCameraByIP(string &ip, bool is_remove = false);
@@ -198,7 +218,10 @@ private:
 public:
     CThreadSafeArray<PCameraInfo> camera_info_list_;
     CThreadSafeArray<PFaceInfo> face_info_list_;
+    CThreadSafeArray<PFaceInfo> face_feature_list_;
     CThreadSafeArray<PFaceInfo> face_result_list_;
+
+    CThreadSafeArray<PPhotoInfo> retrieval_photo_list_;
 
     Semaphore sem_face_avail_;
 
@@ -224,19 +247,21 @@ private:
     string program_name_;
 
     string config_file_path_;
-    bool log_verbose_ = true;
     string hwdata_path_;
 
     string local_server_ip_ = "192.168.10.10";
     int local_server_port_ = 8091;
 
     string gui_server_ip_ = "192.168.10.12";
-    int gui_server_port_ = 19800;
+    int gui_server_port_ = 9000;
 
     int pass_similarity_ = 60;
-    int face_result_maxsize_ = 50;
+    int face_list_maxsize_ = 50;
     int face_valid_second_ = 5;
     int extract_thread_num_ = 1;
+    int mode_ = 1;
+    int face_result_maxsize_ = 10;
+    int delay_retrieval_millisecond_ = 1000;
 };
 
 

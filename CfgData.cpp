@@ -5,6 +5,7 @@
 #include <libxml/parser.h>
 #include "CfgData.h"
 #include "Logger.h"
+#include "RESTClient.h"
 
 CCfgData CCfgData::instance_;
 
@@ -73,12 +74,26 @@ CCfgData::~CCfgData()
 {
     sqlite3_close(sql_);
 
+    retrieval_photo_list_.Lock();
+    while (retrieval_photo_list_.GetSize() > 0)
+    {
+        delete retrieval_photo_list_.RemoveHead();
+    }
+    retrieval_photo_list_.Unlock();
+
     face_result_list_.Lock();
     while (face_result_list_.GetSize() > 0)
     {
         delete face_result_list_.RemoveHead();
     }
     face_result_list_.Unlock();
+
+    face_feature_list_.Lock();
+    while (face_feature_list_.GetSize() > 0)
+    {
+        delete face_feature_list_.RemoveHead();
+    }
+    face_feature_list_.Unlock();
 
     face_info_list_.Lock();
     while (face_info_list_.GetSize() > 0)
@@ -167,7 +182,7 @@ void CCfgData::Fetch()
         else if (0 == xmlStrcmp(cur_node->name, BAD_CAST "FaceListMaxSize"))
         {
             node_text = xmlNodeGetContent(cur_node);
-            face_result_maxsize_ = atoi((char *) node_text);
+            face_list_maxsize_ = atoi((char *) node_text);
         }
         else if (0 == xmlStrcmp(cur_node->name, BAD_CAST "FaceValidSecond"))
         {
@@ -178,6 +193,21 @@ void CCfgData::Fetch()
         {
             node_text = xmlNodeGetContent(cur_node);
             extract_thread_num_ = atoi((char *) node_text);
+        }
+        else if (0 == xmlStrcmp(cur_node->name, BAD_CAST "Mode"))
+        {
+            node_text = xmlNodeGetContent(cur_node);
+            mode_ = atoi((char *) node_text);
+        }
+        else if (0 == xmlStrcmp(cur_node->name, BAD_CAST "FaceResultListMaxSize"))
+        {
+            node_text = xmlNodeGetContent(cur_node);
+            face_result_maxsize_ = atoi((char *) node_text);
+        }
+        else if (0 == xmlStrcmp(cur_node->name, BAD_CAST "DelayRetrievalMillisecond"))
+        {
+            node_text = xmlNodeGetContent(cur_node);
+            delay_retrieval_millisecond_ = atoi((char *) node_text);
         }
 
         if (node_text != nullptr)
@@ -240,10 +270,10 @@ void CCfgData::FetchFeature()
     while (sqlite3_step(select_stmt) == SQLITE_ROW)
     {
         PhotoInfo pi;
-        pi.photo_person_id = (char *) sqlite3_column_text(select_stmt, 0);
-        pi.photo_uuid = (char *) sqlite3_column_text(select_stmt, 1);
-        pi.photo_person_name = (char *) sqlite3_column_text(select_stmt, 2);
-        pi.photo_person_department = (char *) sqlite3_column_text(select_stmt, 3);
+        pi.id = (char *) sqlite3_column_text(select_stmt, 0);
+        pi.uuid = (char *) sqlite3_column_text(select_stmt, 1);
+        pi.name = (char *) sqlite3_column_text(select_stmt, 2);
+        pi.department = (char *) sqlite3_column_text(select_stmt, 3);
         pi.photo_path = (char *) sqlite3_column_text(select_stmt, 4);
 
         const void *photo_feature = sqlite3_column_blob(select_stmt, 5);
@@ -360,22 +390,29 @@ bool CCfgData::UpdateResult(PFaceInfo p_face)
         delete face_result_list_.RemoveHead();
     }
 
-    for (unsigned int i = 0; i < face_result_list_.GetSize(); i++)
+    if ((p_face->score * 100) < pass_similarity_)
     {
-        PFaceInfo p_find = face_result_list_.GetAt(i);
-        if (p_find->person_id == p_face->person_id)
+        update_flag = false;
+    }
+    else
+    {
+        for (unsigned int i = 0; i < face_result_list_.GetSize(); i++)
         {
-            if (p_find->score >= p_face->score)
+            PFaceInfo p_find = face_result_list_.GetAt(i);
+            if (p_find->person_id == p_face->person_id)
             {
-                update_flag = false;
-            }
-            else
-            {
-                face_result_list_.RemoveAt(i);
-                delete p_find;
-            }
+                if (p_find->score >= p_face->score)
+                {
+                    update_flag = false;
+                }
+                else
+                {
+                    face_result_list_.RemoveAt(i);
+                    delete p_find;
+                }
 
-            break;
+                break;
+            }
         }
     }
 
@@ -383,6 +420,9 @@ bool CCfgData::UpdateResult(PFaceInfo p_face)
     {
         // add result list
         face_result_list_.Add(p_face);
+
+        // send face to gui
+        RESTClient::SendFace(p_face);
     }
     else
     {

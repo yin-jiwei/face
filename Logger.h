@@ -107,6 +107,9 @@ private:
     bool m_bShutdown = false;
 
     FILE *m_file = NULL;
+
+    string log_dir_;
+    string program_name_;
 };
 
 #define RUNNING_LOGGER(message) \

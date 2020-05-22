@@ -7,6 +7,7 @@
 #include "Logger.h"
 #include "CfgData.h"
 #include "Base64.h"
+#include "RESTClient.h"
 
 PhotoExtractFeature::PhotoExtractFeature() : feature_extract_((char *) CCfgData::Instance().get_hwdata_path().c_str())
 {
@@ -240,6 +241,7 @@ bool PhotoExtractFeature::ExtractFeature(std::string &photo_id,
         sqlite3_stmt *insert_stmt;
         int rtn_code;
 
+        pthread_rwlock_wrlock(&CCfgData::Instance().photo_features_lock_);
         // prepare insert_stmt
         sql_command.clear();
         sql_command = "INSERT INTO person VALUES ( ?, ?, ?, ?, ?, ? );";
@@ -279,12 +281,14 @@ bool PhotoExtractFeature::ExtractFeature(std::string &photo_id,
         sqlite3_reset(insert_stmt);
         sqlite3_finalize(insert_stmt);
 
+        pthread_rwlock_unlock(&CCfgData::Instance().photo_features_lock_);
+
         // add feature
 //        PhotoInfo pi;
-//        pi.photo_person_id = photo_id;
-//        pi.photo_uuid = compare_id;
-//        pi.photo_person_name = photo_name;
-//        pi.photo_person_department = photo_department;
+//        pi.id = id;
+//        pi.uuid = compare_id;
+//        pi.name = name;
+//        pi.department = department;
 //        pi.photo_path = photo_path_name;
 //
 //        pthread_rwlock_wrlock(&CCfgData::Instance().photo_features_lock_);
@@ -327,7 +331,7 @@ bool PhotoExtractFeature::RetrieveFace(const char *image_data64,
     string log_message;
 
     log_message.clear();
-    log_message = "RetrieveFace start...";
+    log_message = "/face/retrieval RetrieveFace start...";
     INFO_LOG(log_message);
 
     *pp_photo_info = nullptr;
@@ -386,10 +390,10 @@ bool PhotoExtractFeature::RetrieveFace(const char *image_data64,
 
                 // print result
                 log_message.clear();
-                log_message = p_photo_info->photo_person_id
-                              + " " + p_photo_info->photo_uuid
-                              + " " + p_photo_info->photo_person_name
-                              + " " + p_photo_info->photo_person_department
+                log_message = p_photo_info->id
+                              + " " + p_photo_info->uuid
+                              + " " + p_photo_info->name
+                              + " " + p_photo_info->department
                               + " " + to_string(score * 100);
                 INFO_LOG(log_message);
 
@@ -428,7 +432,7 @@ bool PhotoExtractFeature::RetrieveFace(const char *image_data64,
     }
 
     log_message.clear();
-    log_message = "RetrieveFace end...";
+    log_message = "/face/retrieval RetrieveFace end...";
     INFO_LOG(log_message);
 
     return rtn;
@@ -441,7 +445,7 @@ bool PhotoExtractFeature::RetrieveFace(const char *image_data64, int &score, cha
     string log_message;
 
     log_message.clear();
-    log_message = "RetrieveFace start...";
+    log_message = "getScore RetrieveFace start...";
     INFO_LOG(log_message);
 
     // base64 decode
@@ -487,10 +491,10 @@ bool PhotoExtractFeature::RetrieveFace(const char *image_data64, int &score, cha
         // load feature
         face_1_n_.Load_N(jpeg_feature_, 1);
 
-        CCfgData::Instance().face_result_list_.Lock();
-        for (int i = 0; i < CCfgData::Instance().face_result_list_.GetSize(); ++i)
+        CCfgData::Instance().face_feature_list_.Lock();
+        for (int i = 0; i < CCfgData::Instance().face_feature_list_.GetSize(); ++i)
         {
-            p_face = CCfgData::Instance().face_result_list_.GetAt(i);
+            p_face = CCfgData::Instance().face_feature_list_.GetAt(i);
 
             time_t interval_second = now_time - p_face->create_time;
             if (interval_second > CCfgData::Instance().get_face_valid_second())
@@ -524,10 +528,10 @@ bool PhotoExtractFeature::RetrieveFace(const char *image_data64, int &score, cha
         if (nullptr != p_face_result)
         {
             score = max_score;
-            memcpy(face_data, p_face_result->image_data, p_face_result->image_size);
+            memcpy(face_data, p_face_result->image_base64, p_face_result->image_size);
         }
 
-        CCfgData::Instance().face_result_list_.Unlock();
+        CCfgData::Instance().face_feature_list_.Unlock();
 
 //        // write photo
 //        char time_now[64] = {0};
@@ -582,7 +586,157 @@ bool PhotoExtractFeature::RetrieveFace(const char *image_data64, int &score, cha
     }
 
     log_message.clear();
-    log_message = "RetrieveFace end...";
+    log_message = "getScore RetrieveFace end...";
+    INFO_LOG(log_message);
+
+    return rtn;
+}
+
+bool PhotoExtractFeature::RetrieveFace(PhotoInfo *p_photo_info)
+{
+    lock_guard<mutex> guard(safe_mutex_);
+    bool rtn = true;
+    string log_message;
+
+    log_message.clear();
+    log_message = "snapshots/retrieval RetrieveFace start...";
+    INFO_LOG(log_message);
+
+    // base64 decode
+    memset(jpeg_data_, 0, BMP_SIZE);
+    jpeg_size_ = 0;
+
+    CBase64::Decode((unsigned char *) p_photo_info->image_base64, p_photo_info->image_size, jpeg_data_, jpeg_size_);
+
+    log_message = "ExtractFeature start...";
+    INFO_LOG(log_message);
+
+    // extract feature
+    int feature_num = 1;
+    memset(jpeg_feature_, 0, feature_size_);
+
+    try
+    {
+        feature_extract_.Extract(jpeg_data_, jpeg_size_, jpeg_feature_, &feature_num);
+    }
+    catch (HWException hwe)
+    {
+        feature_num = 0;
+
+        log_message.clear();
+        log_message = hwe.what();
+        WARNING_LOG(log_message);
+
+        rtn = false;
+    }
+
+    log_message = "ExtractFeature end...";
+    INFO_LOG(log_message);
+
+    if (feature_num > 0)
+    {
+        time_t now_time = time(nullptr);
+
+        // 1:N
+        int max_score = 0;
+        PFaceInfo p_face_result = nullptr;
+        PFaceInfo p_face = nullptr;
+
+        // load feature
+        face_1_n_.Load_N(jpeg_feature_, 1);
+
+        CCfgData::Instance().face_feature_list_.Lock();
+        for (int i = 0; i < CCfgData::Instance().face_feature_list_.GetSize(); ++i)
+        {
+            p_face = CCfgData::Instance().face_feature_list_.GetAt(i);
+
+            time_t interval_second = now_time - p_face->create_time;
+            if (interval_second > CCfgData::Instance().get_face_valid_second())
+            {
+                continue;
+            }
+
+            try
+            {
+                int index = 0;
+                float similarity = 0.0;
+
+                // load feature
+                face_1_n_.Compare(p_face->image_feature, &index, &similarity, 1);
+
+                int percent_similarity = (int) (similarity * 100);
+                if (max_score < percent_similarity)
+                {
+                    max_score = percent_similarity;
+                    p_face_result = p_face;
+                }
+            }
+            catch (HWException hwe)
+            {
+                log_message.clear();
+                log_message = hwe.what();
+                WARNING_LOG(log_message);
+            }
+        }
+
+        RESTClient::SendFace(p_face_result, p_photo_info, max_score);
+
+        CCfgData::Instance().face_feature_list_.Unlock();
+
+//        // write photo
+//        char time_now[64] = {0};
+//
+//        struct timeval tv;
+//        struct timezone tz;
+//        gettimeofday(&tv, &tz);
+//        struct tm *p = localtime(&tv.tv_sec);
+//
+//        sprintf(time_now, "%04d%02d%02d%02d%02d%02d%03ld",
+//                1900 + p->tm_year,
+//                1 + p->tm_mon,
+//                p->tm_mday,
+//                p->tm_hour,
+//                p->tm_min,
+//                p->tm_sec,
+//                tv.tv_usec / 1000);
+//
+//        // base64
+//        string base64_path = CCfgData::Instance().get_full_path() + "photos/" + time_now + ".txt";
+//
+//        ofstream base64_stream(base64_path);
+//        base64_stream.write(face_data, strlen(face_data));
+//        base64_stream.close();
+//
+//        // card jpg
+//        string card_path = CCfgData::Instance().get_full_path() + "photos/" + time_now + "_card.jpg";
+//
+//        ofstream card_stream(card_path);
+//        card_stream.write((char *) jpeg_data_, jpeg_size_);
+//        card_stream.close();
+//
+//        // jpg
+//        string photo_path = CCfgData::Instance().get_full_path() + "photos/" + time_now + ".jpg";
+//
+//        // base64 decode
+//        memset(jpeg_data_, 0, BMP_SIZE);
+//        jpeg_size_ = 0;
+//        CBase64::Decode((unsigned char *) face_data, strlen(face_data), jpeg_data_, jpeg_size_);
+//
+//        ofstream photo_stream(photo_path);
+//        photo_stream.write((char *) jpeg_data_, jpeg_size_);
+//        photo_stream.close();
+    }
+    else
+    {
+        log_message.clear();
+        log_message = "feature extract failed.";
+        WARNING_LOG(log_message);
+
+        rtn = false;
+    }
+
+    log_message.clear();
+    log_message = "snapshots/retrieval RetrieveFace end...";
     INFO_LOG(log_message);
 
     return rtn;

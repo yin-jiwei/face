@@ -1,8 +1,12 @@
 # idea
 .idea/
 
+# vscode
+.vscode/
+
 # CMake
 cmake-build-*/
+build/
 
 # doc
 doc*/
